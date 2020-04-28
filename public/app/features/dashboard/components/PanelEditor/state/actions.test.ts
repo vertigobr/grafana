@@ -1,5 +1,5 @@
 import { thunkTester } from '../../../../../../test/core/thunk/thunkTester';
-import { closeCompleted, initialState, PanelEditorStateNew } from './reducers';
+import { closeCompleted, initialState, PanelEditorState } from './reducers';
 import { initPanelEditor, panelEditorCleanUp } from './actions';
 import { cleanUpEditPanel, panelModelAndPluginReady } from '../../../state/reducers';
 import { DashboardModel, PanelModel } from '../../../state';
@@ -36,7 +36,7 @@ describe('panelEditor actions', () => {
       const panel = sourcePanel.getEditClone();
       panel.updateOptions({ prop: true });
 
-      const state: PanelEditorStateNew = {
+      const state: PanelEditorState = {
         ...initialState(),
         getPanel: () => panel,
         getSourcePanel: () => sourcePanel,
@@ -44,7 +44,7 @@ describe('panelEditor actions', () => {
       };
 
       const dispatchedActions = await thunkTester({
-        panelEditorNew: state,
+        panelEditor: state,
         dashboard: {
           getModel: () => dashboard,
         },
@@ -70,7 +70,7 @@ describe('panelEditor actions', () => {
       panel.plugin = getPanelPlugin({ id: 'table' });
       panel.updateOptions({ prop: true });
 
-      const state: PanelEditorStateNew = {
+      const state: PanelEditorState = {
         ...initialState(),
         getPanel: () => panel,
         getSourcePanel: () => sourcePanel,
@@ -78,7 +78,7 @@ describe('panelEditor actions', () => {
       };
 
       const dispatchedActions = await thunkTester({
-        panelEditorNew: state,
+        panelEditor: state,
         dashboard: {
           getModel: () => dashboard,
         },
@@ -92,6 +92,10 @@ describe('panelEditor actions', () => {
 
     it('should discard changes when shouldDiscardChanges is true', async () => {
       const sourcePanel = new PanelModel({ id: 12, type: 'graph' });
+      sourcePanel.plugin = {
+        customFieldConfigs: {},
+      } as any;
+
       const dashboard = new DashboardModel({
         panels: [{ id: 12, type: 'graph' }],
       });
@@ -99,7 +103,7 @@ describe('panelEditor actions', () => {
       const panel = sourcePanel.getEditClone();
       panel.updateOptions({ prop: true });
 
-      const state: PanelEditorStateNew = {
+      const state: PanelEditorState = {
         ...initialState(),
         shouldDiscardChanges: true,
         getPanel: () => panel,
@@ -108,7 +112,7 @@ describe('panelEditor actions', () => {
       };
 
       const dispatchedActions = await thunkTester({
-        panelEditorNew: state,
+        panelEditor: state,
         dashboard: {
           getModel: () => dashboard,
         },

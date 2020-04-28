@@ -2,16 +2,18 @@ import React, { FC } from 'react';
 import { debounce } from 'lodash';
 import { useAsyncFn } from 'react-use';
 import { SelectableValue } from '@grafana/data';
-import { Forms } from '@grafana/ui';
-import { FormInputSize } from '@grafana/ui/src/components/Forms/types';
+import { AsyncSelect } from '@grafana/ui';
 import { backendSrv } from 'app/core/services/backend_srv';
-import { DashboardSearchHit, DashboardDTO } from 'app/types';
+import { DashboardSearchHit } from 'app/features/search/types';
+import { DashboardDTO } from 'app/types';
 
 export interface Props {
   onSelected: (dashboard: DashboardDTO) => void;
   currentDashboard?: SelectableValue<number>;
-  size?: FormInputSize;
+  width?: number;
   isClearable?: boolean;
+  invalid?: boolean;
+  disabled?: boolean;
 }
 
 const getDashboards = (query = '') => {
@@ -24,7 +26,14 @@ const getDashboards = (query = '') => {
   });
 };
 
-export const DashboardPicker: FC<Props> = ({ onSelected, currentDashboard, size = 'md', isClearable = false }) => {
+export const DashboardPicker: FC<Props> = ({
+  onSelected,
+  currentDashboard,
+  width,
+  isClearable = false,
+  invalid,
+  disabled,
+}) => {
   const debouncedSearch = debounce(getDashboards, 300, {
     leading: true,
     trailing: true,
@@ -33,8 +42,8 @@ export const DashboardPicker: FC<Props> = ({ onSelected, currentDashboard, size 
   const [state, searchDashboards] = useAsyncFn(debouncedSearch, []);
 
   return (
-    <Forms.AsyncSelect
-      size={size}
+    <AsyncSelect
+      width={width}
       isLoading={state.loading}
       isClearable={isClearable}
       defaultOptions={true}
@@ -43,6 +52,8 @@ export const DashboardPicker: FC<Props> = ({ onSelected, currentDashboard, size 
       placeholder="Select dashboard"
       noOptionsMessage="No dashboards found"
       value={currentDashboard}
+      invalid={invalid}
+      disabled={disabled}
     />
   );
 };

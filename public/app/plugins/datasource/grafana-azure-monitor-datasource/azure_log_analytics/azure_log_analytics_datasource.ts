@@ -1,8 +1,9 @@
 import _ from 'lodash';
 import LogAnalyticsQuerystringBuilder from '../log_analytics/querystring_builder';
 import ResponseParser from './response_parser';
-import { AzureMonitorQuery, AzureDataSourceJsonData } from '../types';
-import { DataQueryRequest, DataSourceInstanceSettings } from '@grafana/data';
+import { AzureMonitorQuery, AzureDataSourceJsonData, AzureLogsVariable } from '../types';
+import { TimeSeries, toDataFrame } from '@grafana/data';
+import { DataQueryRequest, DataQueryResponseData, DataSourceInstanceSettings } from '@grafana/data';
 import { getBackendSrv } from '@grafana/runtime';
 import { TemplateSrv } from 'app/features/templating/template_srv';
 
@@ -21,9 +22,23 @@ export default class AzureLogAnalyticsDatasource {
     private templateSrv: TemplateSrv
   ) {
     this.id = instanceSettings.id;
-    this.baseUrl = '/loganalyticsazure';
-    this.url = instanceSettings.url;
-    this.defaultOrFirstWorkspace = this.instanceSettings.jsonData.logAnalyticsDefaultWorkspace;
+
+    switch (this.instanceSettings.jsonData.cloudName) {
+      case 'govazuremonitor': // Azure US Government
+        this.baseUrl = '/govloganalyticsazure';
+        break;
+      case 'germanyazuremonitor': // Azure Germany
+        break;
+      case 'chinaazuremonitor': // Azure China
+        this.baseUrl = '/chinaloganalyticsazure';
+        break;
+      default:
+        // Azure Global
+        this.baseUrl = '/loganalyticsazure';
+    }
+
+    this.url = instanceSettings.url || '';
+    this.defaultOrFirstWorkspace = this.instanceSettings.jsonData.logAnalyticsDefaultWorkspace || '';
 
     this.setWorkspaceUrl();
   }
@@ -43,11 +58,24 @@ export default class AzureLogAnalyticsDatasource {
       this.azureMonitorUrl = `/${azureCloud}/subscriptions`;
     } else {
       this.subscriptionId = this.instanceSettings.jsonData.logAnalyticsSubscriptionId;
-      this.azureMonitorUrl = `/workspacesloganalytics/subscriptions`;
+
+      switch (this.instanceSettings.jsonData.cloudName) {
+        case 'govazuremonitor': // Azure US Government
+          this.azureMonitorUrl = `/govworkspacesloganalytics/subscriptions`;
+          break;
+        case 'germanyazuremonitor': // Azure Germany
+          break;
+        case 'chinaazuremonitor': // Azure China
+          this.azureMonitorUrl = `/chinaworkspacesloganalytics/subscriptions`;
+          break;
+        default:
+          // Azure Global
+          this.azureMonitorUrl = `/workspacesloganalytics/subscriptions`;
+      }
     }
   }
 
-  getWorkspaces(subscription: string) {
+  getWorkspaces(subscription: string): Promise<AzureLogsVariable[]> {
     const subscriptionId = this.templateSrv.replace(subscription || this.subscriptionId);
 
     const workspaceListUrl =
@@ -66,7 +94,7 @@ export default class AzureLogAnalyticsDatasource {
     if (!workspace) {
       return Promise.resolve();
     }
-    const url = `${this.baseUrl}/${workspace}/metadata`;
+    const url = `${this.baseUrl}/${this.templateSrv.replace(workspace, {})}/metadata`;
 
     return this.doRequest(url).then((response: any) => {
       return new ResponseParser(response.data).parseSchemaResult();
@@ -79,45 +107,78 @@ export default class AzureLogAnalyticsDatasource {
     }).map(target => {
       const item = target.azureLogAnalytics;
 
-      const querystringBuilder = new LogAnalyticsQuerystringBuilder(
-        this.templateSrv.replace(item.query, options.scopedVars, this.interpolateVariable),
-        options,
-        'TimeGenerated'
-      );
-      const generated = querystringBuilder.generate();
-
       let workspace = this.templateSrv.replace(item.workspace, options.scopedVars);
 
       if (!workspace && this.defaultOrFirstWorkspace) {
         workspace = this.defaultOrFirstWorkspace;
       }
 
-      const url = `${this.baseUrl}/${workspace}/query?${generated.uriString}`;
+      const subscriptionId = this.templateSrv.replace(target.subscription || this.subscriptionId, options.scopedVars);
+      const query = this.templateSrv.replace(item.query, options.scopedVars, this.interpolateVariable);
 
       return {
         refId: target.refId,
         intervalMs: options.intervalMs,
         maxDataPoints: options.maxDataPoints,
         datasourceId: this.id,
-        url: url,
-        query: generated.rawQuery,
         format: target.format,
-        resultFormat: item.resultFormat,
+        queryType: 'Azure Log Analytics',
+        subscriptionId: subscriptionId,
+        azureLogAnalytics: {
+          resultFormat: item.resultFormat,
+          query: query,
+          workspace: workspace,
+        },
       };
     });
 
     if (!queries || queries.length === 0) {
-      return;
+      return [];
     }
 
-    const promises = this.doQueries(queries);
-
-    return Promise.all(promises).then(results => {
-      return new ResponseParser(results).parseQueryResult();
+    const { data } = await getBackendSrv().datasourceRequest({
+      url: '/api/tsdb/query',
+      method: 'POST',
+      data: {
+        from: options.range.from.valueOf().toString(),
+        to: options.range.to.valueOf().toString(),
+        queries,
+      },
     });
+
+    const result: DataQueryResponseData[] = [];
+    if (data.results) {
+      Object.values(data.results).forEach((queryRes: any) => {
+        queryRes.series?.forEach((series: any) => {
+          const timeSeries: TimeSeries = {
+            target: series.name,
+            datapoints: series.points,
+            refId: queryRes.refId,
+            meta: queryRes.meta,
+          };
+          result.push(toDataFrame(timeSeries));
+        });
+
+        queryRes.tables?.forEach((table: any) => {
+          result.push(toDataFrame(table));
+        });
+      });
+    }
+
+    return result;
   }
 
   metricFindQuery(query: string) {
+    const workspacesQuery = query.match(/^workspaces\(\)/i);
+    if (workspacesQuery) {
+      return this.getWorkspaces(this.subscriptionId);
+    }
+
+    const workspacesQueryWithSub = query.match(/^workspaces\(["']?([^\)]+?)["']?\)/i);
+    if (workspacesQueryWithSub) {
+      return this.getWorkspaces((workspacesQueryWithSub[1] || '').trim());
+    }
+
     return this.getDefaultOrFirstWorkspace().then((workspace: any) => {
       const queries: any[] = this.buildQuery(query, null, workspace);
 
@@ -328,7 +389,7 @@ export default class AzureLogAnalyticsDatasource {
     return undefined;
   }
 
-  isValidConfigField(field: string) {
+  isValidConfigField(field: string | undefined) {
     return field && field.length > 0;
   }
 }

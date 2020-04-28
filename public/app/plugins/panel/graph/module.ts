@@ -12,14 +12,7 @@ import { axesEditorComponent } from './axes_editor';
 import config from 'app/core/config';
 import TimeSeries from 'app/core/time_series2';
 import { getProcessedDataFrames } from 'app/features/dashboard/state/runRequest';
-import {
-  getColorFromHexRgbOrName,
-  PanelEvents,
-  DataFrame,
-  DataLink,
-  DateTimeInput,
-  VariableSuggestion,
-} from '@grafana/data';
+import { getColorFromHexRgbOrName, PanelEvents, DataFrame, DataLink, VariableSuggestion } from '@grafana/data';
 
 import { GraphContextMenuCtrl } from './GraphContextMenuCtrl';
 import { getDataLinksVariableSuggestions } from 'app/features/panel/panellinks/link_srv';
@@ -168,17 +161,18 @@ class GraphCtrl extends MetricsPanelCtrl {
   }
 
   onInitEditMode() {
-    this.addEditorTab('Display options', 'public/app/plugins/panel/graph/tab_display.html');
+    this.addEditorTab('Display', 'public/app/plugins/panel/graph/tab_display.html');
+    this.addEditorTab('Series overides', 'public/app/plugins/panel/graph/tab_series_overrides.html');
     this.addEditorTab('Axes', axesEditorComponent);
     this.addEditorTab('Legend', 'public/app/plugins/panel/graph/tab_legend.html');
-    this.addEditorTab('Thresholds & Time Regions', 'public/app/plugins/panel/graph/tab_thresholds_time_regions.html');
+    this.addEditorTab('Thresholds', 'public/app/plugins/panel/graph/tab_thresholds.html');
+    this.addEditorTab('Time regions', 'public/app/plugins/panel/graph/tab_time_regions.html');
     this.addEditorTab('Data links', 'public/app/plugins/panel/graph/tab_drilldown_links.html');
     this.subTabIndex = 0;
     this.hiddenSeriesTainted = false;
   }
 
   onInitPanelActions(actions: any[]) {
-    actions.push({ text: 'Export CSV', click: 'ctrl.exportCsv()' });
     actions.push({ text: 'Toggle legend', click: 'ctrl.toggleLegend()', shortcut: 'p l' });
   }
 
@@ -339,25 +333,11 @@ class GraphCtrl extends MetricsPanelCtrl {
     this.render();
   }
 
-  exportCsv() {
-    const scope = this.$scope.$new(true);
-    scope.seriesList = this.seriesList
-      .filter(series => !this.panel.legend.hideEmpty || !series.allIsNull)
-      .filter(series => !this.panel.legend.hideZero || !series.allIsZero);
-    this.publishAppEvent(CoreEvents.showModal, {
-      templateHtml: '<export-data-modal data="seriesList"></export-data-modal>',
-      scope,
-      modalClass: 'modal--narrow',
-    });
-  }
-
   onContextMenuClose = () => {
     this.contextMenuCtrl.toggleMenu();
   };
 
-  formatDate = (date: DateTimeInput, format?: string) => {
-    return this.dashboard.formatDate.apply(this.dashboard, [date, format]);
-  };
+  getTimeZone = () => this.dashboard.getTimezone();
 
   getDataFrameByRefId = (refId: string) => {
     return this.dataList.filter(dataFrame => dataFrame.refId === refId)[0];

@@ -42,10 +42,12 @@ type PluginScanner struct {
 	pluginPath           string
 	errors               []error
 	backendPluginManager backendplugin.Manager
+	cfg                  *setting.Cfg
 }
 
 type PluginManager struct {
 	BackendPluginManager backendplugin.Manager `inject:""`
+	Cfg                  *setting.Cfg          `inject:""`
 	log                  log.Logger
 }
 
@@ -74,6 +76,14 @@ func (pm *PluginManager) Init() error {
 	plugDir := path.Join(setting.StaticRootPath, "app/plugins")
 	if err := pm.scan(plugDir); err != nil {
 		return errutil.Wrapf(err, "Failed to scan main plugin directory '%s'", plugDir)
+	}
+
+	pm.log.Info("Checking Bundled Plugins")
+	plugDir = path.Join(setting.HomePath, "plugins-bundled")
+	if _, err := os.Stat(plugDir); !os.IsNotExist(err) {
+		if err := pm.scan(plugDir); err != nil {
+			return errutil.Wrapf(err, "failed to scan bundled plugin directory '%s'", plugDir)
+		}
 	}
 
 	// check if plugins dir exists
@@ -111,8 +121,15 @@ func (pm *PluginManager) Init() error {
 		app.initApp()
 	}
 
+	if Renderer != nil {
+		Renderer.initFrontendPlugin()
+	}
+
 	for _, p := range Plugins {
-		if !p.IsCorePlugin {
+		if p.IsCorePlugin {
+			p.Signature = PluginSignatureInternal
+		} else {
+			p.Signature = GetPluginSignatureState(p)
 			metrics.SetPluginBuildInformation(p.Id, p.Type, p.Info.Version)
 		}
 	}
@@ -140,19 +157,14 @@ func (pm *PluginManager) Run(ctx context.Context) error {
 }
 
 func (pm *PluginManager) checkPluginPaths() error {
-	for _, section := range setting.Raw.Sections() {
-		if !strings.HasPrefix(section.Name(), "plugin.") {
-			continue
-		}
-
-		path := section.Key("path").String()
-		if path == "" {
+	for pluginID, settings := range pm.Cfg.PluginSettings {
+		path, exists := settings["path"]
+		if !exists || path == "" {
 			continue
 		}
 
 		if err := pm.scan(path); err != nil {
-			return errutil.Wrapf(err, "Failed to scan directory configured for plugin '%s': '%s'",
-				section.Name(), path)
+			return errutil.Wrapf(err, "Failed to scan directory configured for plugin '%s': '%s'", pluginID, path)
 		}
 	}
 
@@ -164,15 +176,16 @@ func (pm *PluginManager) scan(pluginDir string) error {
 	scanner := &PluginScanner{
 		pluginPath:           pluginDir,
 		backendPluginManager: pm.BackendPluginManager,
+		cfg:                  pm.Cfg,
 	}
 
 	if err := util.Walk(pluginDir, true, true, scanner.walker); err != nil {
 		if xerrors.Is(err, os.ErrNotExist) {
-			pm.log.Debug("Couldn't scan dir '%s' since it doesn't exist")
+			pm.log.Debug("Couldn't scan directory since it doesn't exist", "pluginDir", pluginDir)
 			return nil
 		}
 		if xerrors.Is(err, os.ErrPermission) {
-			pm.log.Debug("Couldn't scan dir '%s' due to lack of permissions")
+			pm.log.Debug("Couldn't scan directory due to lack of permissions", "pluginDir", pluginDir)
 			return nil
 		}
 		if pluginDir != "data/plugins" {
@@ -186,6 +199,15 @@ func (pm *PluginManager) scan(pluginDir string) error {
 	}
 
 	return nil
+}
+
+// GetDatasource returns a datasource based on passed pluginID if it exists
+//
+// This function fetches the datasource from the global variable DataSources in this package.
+// Rather then refactor all dependencies on the global variable we can use this as an transition.
+func (pm *PluginManager) GetDatasource(pluginID string) (*DataSourcePlugin, bool) {
+	ds, exist := DataSources[pluginID]
+	return ds, exist
 }
 
 func (scanner *PluginScanner) walker(currentPath string, f os.FileInfo, err error) error {
