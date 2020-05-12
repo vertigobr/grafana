@@ -56,7 +56,7 @@ func logsResultsToDataframes(response *cloudwatchlogs.GetQueryResultsOutput) (*d
 			newFields[len(newFields)-1].SetConfig(
 				&data.FieldConfig{
 					Custom: map[string]interface{}{
-						"Hidden": true,
+						"hidden": true,
 					},
 				},
 			)
