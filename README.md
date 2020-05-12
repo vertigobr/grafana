@@ -1,5 +1,7 @@
 ![Grafana](docs/logo-horizontal.png)
 
+**Detalhes das alterações realizadas no [CHANGELOG](/CHANGELOG.md)**
+
 The open-source platform for monitoring and observability.
 
 [![License](https://img.shields.io/github/license/grafana/grafana)](LICENSE)
